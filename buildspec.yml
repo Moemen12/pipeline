@@ -3,30 +3,25 @@ version: 0.2
 phases:
   install:
     runtime-versions:
-      nodejs: 20 # Use a modern Node.js LTS version
+      nodejs: 20
     commands:
-      # Install project dependencies
       - echo Installing dependencies...
       - npm install
 
   build:
     commands:
-      # Run the Vite production build command
-      # This command typically generates the static assets into a 'dist' folder
       - echo Building React Vite application...
       - npm run build 
       
   post_build:
     commands:
-      # Copy the appspec.yml and deployment scripts into the root of the artifact bundle
-      # This ensures CodeDeploy can find them.
       - echo Creating deployment artifact structure...
+      # Copy the appspec.yml and the scripts directory into the 'dist' folder
       - cp appspec.yml dist/
       - cp -R scripts/ dist/
 
 artifacts:
   files:
-    # All files in the 'dist' directory (now including appspec.yml and scripts/)
-    # are packaged for CodeDeploy.
+    # All files inside the final 'dist' folder are packaged
     - '**/*'
-  base-directory: dist/ # The contents of the 'dist' folder are the root of the artifact.
+  base-directory: dist/ # Sets the contents of 'dist' as the root of the artifact
