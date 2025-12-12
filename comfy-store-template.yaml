@@ -1,0 +1,305 @@
+---
+
+Parameters:
+  EC2KeyPairName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Description: Select an existing EC2 Key Pair for SSH access.
+  SubnetId:
+    Type: AWS::EC2::Subnet::Id
+    Description: Select a subnet for the EC2 instance (preferably a public subnet with internet access)
+Resources:
+
+  CodeBuildServiceRole:
+    Type: AWS::IAM::Role
+    UpdateReplacePolicy: Delete
+    DeletionPolicy: Delete
+    Properties:
+      Path: /service-role/
+      ManagedPolicyArns:
+        - !Ref CodeBuildConnectionPolicy
+        - !Ref CodeBuildBasePolicy
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Action: sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service: codebuild.amazonaws.com
+  CodeDeployRole:
+    UpdateReplacePolicy: Delete
+    Type: AWS::IAM::Role
+    DeletionPolicy: Delete
+    Properties:
+      Path: /
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/service-role/AWSCodeDeployRole"
+      MaxSessionDuration: 3600
+      Description: "Allows CodeDeploy to call AWS services such as Auto Scaling on your behalf."
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Action: sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service: "codedeploy.amazonaws.com"
+            Sid: ""
+  GitHubConnection:
+    UpdateReplacePolicy: Delete
+    Type: AWS::CodeStarConnections::Connection
+    DeletionPolicy: Delete
+    Properties:
+      ConnectionName: github-connection
+      ProviderType: GitHub
+      Tags: []
+  CodeBuildConnectionPolicy:
+    UpdateReplacePolicy: Delete
+    Type: AWS::IAM::ManagedPolicy
+    DeletionPolicy: Delete
+    Properties:
+      Path: "/service-role/"
+      Description: "Policy used in trust relationship with CodeBuild for CodeStar Connections"
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Resource: "*"  # <--- CHANGED: Use wildcard to fix the ARN mismatch issue
+            Action:
+              - "codestar-connections:UseConnection"
+              - "codestar-connections:GetConnection"
+              - "codestar-connections:GetConnectionToken"
+            Effect: "Allow"
+  Ec2InstanceProfile:
+    UpdateReplacePolicy: "Delete"
+    Type: "AWS::IAM::InstanceProfile"
+    DeletionPolicy: "Delete"
+    Properties:
+      Path: "/"
+      Roles:
+        - Ref: "Ec2InstanceRole"
+  CodeArtifactDomain:
+    UpdateReplacePolicy: "Delete"
+    Type: "AWS::CodeArtifact::Domain"
+    DeletionPolicy: "Delete"
+    Properties:
+      DomainName: "saadeh"
+  ComfyStoreBucket:
+    UpdateReplacePolicy: "Delete"
+    Type: "AWS::S3::Bucket"
+    DeletionPolicy: "Delete"
+    Properties:
+      PublicAccessBlockConfiguration:
+        RestrictPublicBuckets: true
+        IgnorePublicAcls: true
+        BlockPublicPolicy: true
+        BlockPublicAcls: true
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: "BucketOwnerEnforced"
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: true
+            ServerSideEncryptionByDefault:
+              SSEAlgorithm: "AES256"
+  CodeArtifactConsumerPolicy:
+    UpdateReplacePolicy: "Delete"
+    Type: "AWS::IAM::ManagedPolicy"
+    DeletionPolicy: "Delete"
+    Properties:
+      Path: "/"
+      Description: ""
+      Groups: []
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Resource: "*"
+            Action:
+              - "codeartifact:GetAuthorizationToken"
+              - "codeartifact:GetRepositoryEndpoint"
+              - "codeartifact:ReadFromRepository"
+            Effect: "Allow"
+          - Condition:
+              StringEquals:
+                sts:AWSServiceName: "codeartifact.amazonaws.com"
+            Resource: "*"
+            Action: "sts:GetServiceBearerToken"
+            Effect: "Allow"
+      Roles: []
+      Users: []
+  ComfyStoreRepository:
+    UpdateReplacePolicy: "Delete"
+    Type: "AWS::CodeArtifact::Repository"
+    DeletionPolicy: "Delete"
+    Properties:
+      DomainName:
+        Fn::GetAtt:
+          - "CodeArtifactDomain"
+          - "Name"
+      Upstreams:
+        - Fn::GetAtt:
+            - "NpmStoreRepository"
+            - "Name"
+      RepositoryName: "comfy-store"
+  CodeDeployApplication:
+    UpdateReplacePolicy: "Delete"
+    Type: "AWS::CodeDeploy::Application"
+    DeletionPolicy: "Delete"
+    Properties:
+      ApplicationName: "comfys-store"
+      ComputePlatform: "Server"
+  NpmStoreRepository:
+    UpdateReplacePolicy: "Delete"
+    Type: "AWS::CodeArtifact::Repository"
+    DeletionPolicy: "Delete"
+    Properties:
+      RepositoryName: "npm-store"
+      Description: "Provides npm artifacts from npm, Inc."
+      ExternalConnections:
+        - "public:npmjs"
+      DomainName:
+        Fn::GetAtt:
+          - "CodeArtifactDomain"
+          - "Name"
+  CodeBuildBasePolicy:
+    UpdateReplacePolicy: "Delete"
+    Type: "AWS::IAM::ManagedPolicy"
+    DeletionPolicy: "Delete"
+    Properties:
+      Path: "/service-role/"
+      Description: "Policy used in trust relationship with CodeBuild"
+      Groups: []
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Resource:
+              - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/comfy-store-build"
+              - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/comfy-store-build:*"
+            Action:
+              - "logs:CreateLogGroup"
+              - "logs:CreateLogStream"
+              - "logs:PutLogEvents"
+            Effect: "Allow"
+          - Resource:
+              - !Sub "arn:aws:s3:::codepipeline-${AWS::Region}-*"
+            Action:
+              - "s3:PutObject"
+              - "s3:GetObject"
+              - "s3:GetObjectVersion"
+              - "s3:GetBucketAcl"
+              - "s3:GetBucketLocation"
+            Effect: "Allow"
+          - Resource:
+              - !Sub "arn:aws:s3:::${ComfyStoreBucket}"
+              - !Sub "arn:aws:s3:::${ComfyStoreBucket}/*"
+            Action:
+              - "s3:PutObject"
+              - "s3:GetBucketAcl"
+              - "s3:GetBucketLocation"
+            Effect: "Allow"
+          - Resource:
+              - !Sub "arn:aws:codebuild:${AWS::Region}:${AWS::AccountId}:report-group/comfy-store-build-*"
+            Action:
+              - "codebuild:CreateReportGroup"
+              - "codebuild:CreateReport"
+              - "codebuild:UpdateReport"
+              - "codebuild:BatchPutTestCases"
+              - "codebuild:BatchPutCodeCoverages"
+            Effect: "Allow"
+      Roles: []
+      Users: []
+  Ec2InstanceRole:
+    UpdateReplacePolicy: "Delete"
+    Type: "AWS::IAM::Role"
+    DeletionPolicy: "Delete"
+    Properties:
+      Path: "/"
+      ManagedPolicyArns:
+        - Ref: "CodeArtifactConsumerPolicy"
+      MaxSessionDuration: 3600
+      Description: "Allows EC2 instances to call AWS services on your behalf."
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Action: "sts:AssumeRole"
+            Effect: "Allow"
+            Principal:
+              Service: "ec2.amazonaws.com"
+  WebServerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Enable SSH and HTTP access to the EC2 instance
+      SecurityGroupIngress:
+        # Allow SSH (Port 22) - RESTRICT THIS TO YOUR IP IN PRODUCTION
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0 # CHANGE THIS to your current IP address/32 for security!
+        # Allow HTTP (Port 80) for Nginx web access
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+  WebServerHost:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: ami-0b46816ffa1234887
+      InstanceType: t3.nano
+      KeyName: !Ref EC2KeyPairName
+      SubnetId: !Ref SubnetId
+      SecurityGroupIds:
+        - Fn::GetAtt:
+            - WebServerSecurityGroup
+            - GroupId
+      IamInstanceProfile: !Ref Ec2InstanceProfile
+      Tags:
+        - Key: Name
+          Value: Nginx-Server-for-CodeDeploy
+
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          # Note: Uses 'yum' (aliased to 'dnf' on AL2023) to install Nginx
+
+          # 1. Update system packages
+          sudo yum update -y
+          
+          # 2. Install Nginx - Correct command for AL2023/modern Linux
+          sudo yum install nginx -y 
+          
+          # 3. Start Nginx service and enable it to start on boot
+          sudo systemctl start nginx
+          sudo systemctl enable nginx
+          
+          # OPTIONAL: Replace the default Nginx welcome page
+          echo "<h1>Hello from Nginx, Deployed by CloudFormation!</h1>" | sudo tee /usr/share/nginx/html/index.html
+
+          # 4. Install the CodeDeploy Agent (required for your CodeDeploy setup)
+          # These steps are robust for most RHEL-based distributions
+          sudo yum install ruby -y
+          sudo yum install wget -y
+          cd /home/ec2-user
+          wget https://aws-codedeploy-${AWS::Region}.s3.amazonaws.com/latest/install
+          chmod +x ./install
+          sudo ./install auto
+          sudo service codedeploy-agent status
+  codeBuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: comfy-store-build
+      Description: "Builds the comfy-store application"
+      ServiceRole: !GetAtt CodeBuildServiceRole.Arn
+      Source:
+        Type: GITHUB
+        Location: https://github.com/Moemen12/pipeline.git
+        GitCloneDepth: 1
+        SourceAuth:
+          Type: CODECONNECTIONS
+          Resource: !Ref GitHubConnection
+      Environment:
+        Type: LINUX_CONTAINER
+        Image: aws/codebuild/amazonlinux-x86_64-standard:5.0
+        ComputeType: BUILD_GENERAL1_SMALL
+      Artifacts:
+        Type: S3
+      Location: !Ref ComfyStoreBucket
+      Packaging: ZIP
+
