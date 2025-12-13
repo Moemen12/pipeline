@@ -6,7 +6,7 @@ phases:
       nodejs: 20
     commands:
       - echo Installing dependencies...
-      - aws codeartifact login --tool npm --repository npm-store --domain saadeh --domain-owner 710497026541 --region eu-north-1
+      - aws codeartifact login --tool npm --repository npm-store --domain saadeh --domain-owner 710497026541 --region $AWS_REGION
       - npm install
 
   build:

@@ -22,10 +22,12 @@ Resources:
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
-          - Action: sts:AssumeRole
-            Effect: Allow
+          - Effect: Allow
             Principal:
-              Service: codebuild.amazonaws.com
+              Service:
+                - codebuild.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
   CodeDeployRole:
     UpdateReplacePolicy: Delete
     Type: AWS::IAM::Role
@@ -144,7 +146,7 @@ Resources:
     Type: "AWS::CodeDeploy::Application"
     DeletionPolicy: "Delete"
     Properties:
-      ApplicationName: "comfys-store"
+      ApplicationName: comfy-store-app
       ComputePlatform: "Server"
   NpmStoreRepository:
     UpdateReplacePolicy: "Delete"
@@ -170,6 +172,19 @@ Resources:
       PolicyDocument:
         Version: "2012-10-17"
         Statement:
+          - Effect: "Allow"
+            Action:
+              - "codeartifact:GetAuthorizationToken"
+              - "codeartifact:GetRepositoryEndpoint"
+              - "codeartifact:ReadFromRepository"
+            Resource: "*"
+          - Effect: "Allow"
+            Action: "sts:GetServiceBearerToken"
+            Resource: "*"
+            Condition:
+              StringEquals:
+                sts:AWSServiceName: "codeartifact.amazonaws.com"
+          # -------------------------------------------
           - Resource:
               - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/comfy-store-build"
               - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/comfy-store-build:*"
@@ -213,7 +228,8 @@ Resources:
     Properties:
       Path: "/"
       ManagedPolicyArns:
-        - Ref: "CodeArtifactConsumerPolicy"
+        - !Ref CodeArtifactConsumerPolicy
+        - !Ref S3ArtifactPolicy
       MaxSessionDuration: 3600
       Description: "Allows EC2 instances to call AWS services on your behalf."
       AssumeRolePolicyDocument:
@@ -291,8 +307,8 @@ Resources:
         Type: GITHUB
         Location: https://github.com/Moemen12/pipeline.git
         GitCloneDepth: 1
-        SourceAuth:
-          Type: CODECONNECTIONS
+        Auth:
+          Type: OAUTH
           Resource: !Ref GitHubConnection
       Environment:
         Type: LINUX_CONTAINER
@@ -300,6 +316,38 @@ Resources:
         ComputeType: BUILD_GENERAL1_SMALL
       Artifacts:
         Type: S3
-      Location: !Ref ComfyStoreBucket
-      Packaging: ZIP
-
+        Location: !Ref ComfyStoreBucket
+        Packaging: ZIP
+  codeDeployGroup:
+    Type: AWS::CodeDeploy::DeploymentGroup
+    Properties:
+      DeploymentConfigName: CodeDeployDefault.AllAtOnce
+      DeploymentGroupName: comfy-store-deployment-group
+      ServiceRoleArn: !GetAtt CodeDeployRole.Arn
+      ApplicationName: comfy-store-app
+      DeploymentStyle: 
+        DeploymentOption: WITHOUT_TRAFFIC_CONTROL
+        DeploymentType: IN_PLACE
+      Ec2TagFilters:
+        - Key: Name
+          Value: Nginx-Server-for-CodeDeploy
+          Type: KEY_AND_VALUE
+  S3ArtifactPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Path: "/"
+      Description: "Policy for EC2 role to read artifacts from the ComfyStoreBucket"
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - "s3:GetObject"
+              - "s3:GetObjectVersion"
+            Resource:
+              - !Sub "arn:${AWS::Partition}:s3:::${ComfyStoreBucket}/*"
+          - Effect: Allow
+            Action:
+              - "s3:GetBucketLocation"
+            Resource:
+              - !Sub "arn:${AWS::Partition}:s3:::${ComfyStoreBucket}"
