@@ -285,8 +285,6 @@ Resources:
           sudo systemctl start nginx
           sudo systemctl enable nginx
           
-          # OPTIONAL: Replace the default Nginx welcome page
-          echo "<h1>Hello from Nginx, Deployed by CloudFormation!</h1>" | sudo tee /usr/share/nginx/html/index.html
 
           # 4. Install the CodeDeploy Agent (required for your CodeDeploy setup)
           # These steps are robust for most RHEL-based distributions
